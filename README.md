@@ -106,6 +106,40 @@ c:/>myproject
 
 # 플라스크 기초
 ## 프로젝트 구조
+플라스크는 장고와 같이 프로젝트 구조가 정해져 있지 않다. 그러므로 우리가 스스로 프로젝트 구조를 다음과 같이 구상해볼 필요가 있다.
+```
+c:/projects/myproject
+├── pybo/
+│      ├─ __init__.py
+│      ├─ models.py
+│      ├─ forms.py
+│      ├─ views/
+│      │   └─ main_views.py
+│      ├─ static/
+│      │   └─ style.css
+│      └─ templates/
+│            └─ index.html
+└── config.py
+```
+### pybo 패키지
+먼저 pybo.py앱은 pybo 패키지로 변경할 수 있다. pybo 디렉터리의 __init__.py가 pybo.py의 역할을 수행할 수 있다.
+- models.py
+    - 파이보 프로젝트는 ORM을 지원하는 파이썬 데이터베이스 툴킷인 SQLAlchemy를 사용할 것이다. SQLAlchemy는 모델기반으로 데이터베이스를 처리하기 때문에 모델 클래스들을 정의하는 models.py 파일이 필요하다.
+
+- forms.py
+    - 파이보 프로젝트는 브라우저에서 서버로 전송된 폼을 처리하기 위해서 WTForms라는 라이브러리를 사용할 것이다. WTForms 역시 모델기반으로 폼을 처리하기 때문에 폼 클래스들을 정의하는 forms.py 파일이 필요하다.
+
+- views folder
+    - pybo.py 파일에 등록되어 있던 hello_pybo와 같은 함수를 뷰(views) 디렉터리를 생성하여 그 하위에 기능별로 저장하도록 하자. 파이보 프로젝트는 만들어야 할 뷰 함수가 상당히 많기 때문에 기능별로 분리하여 main_views.py, question_views.py, answer_views.py, ... 등의 뷰 파일들을 계속 만들어 갈 것이다.
+
+- static folder
+    - 스태틱(static) 디렉터리는 파이보 프로젝트의 스타일시트(*.css), 자바스크립트(*.js) 그리고 이미지파일(*.jpg, *.png)등을 저장하는 디렉터리로 사용할 것이다.
+
+- templates folder
+    - 템플릿(templates) 디렉터리는 파이보의 질문목록, 질문상세등의 HTML 파일을 저장하는 디렉터리이다. 위에 구조에는 index.html 파일만 있지만 프로젝트가 진행되면 question_list.html, question_detail.html 등의 템플릿 파일들이 계속 추가될 것이다.
+
+- config.py
+    - config.py 파일은 파이보 프로젝트의 환경변수등을 저장하는 파일이다. 데이터베이스 환경등에 대한 설정을 이 파일에 저장할 것이다.
 ## 어플리케이션 팩토리
 ## 블루 프린트
 ## 모델
