@@ -141,8 +141,122 @@ c:/projects/myproject
 - config.py
     - config.py 파일은 파이보 프로젝트의 환경변수등을 저장하는 파일이다. 데이터베이스 환경등에 대한 설정을 이 파일에 저장할 것이다.
 ## 어플리케이션 팩토리
+myproject 하위에 pybo 디렉터리를 생성하고 pybo.py파일을 pybo 디렉터리 하위에 __init__.py 라는 파일명으로 변경후 이동하였다. 그리고 플라스크 실행시 로컬서버가 잘 실행되는 것을 볼 수 있다. 그 이유는  FLASK_APP=pybo는 pybo 패키지를 가리키는 것이기 때문이다.(파일 이름 x)
 ## 블루 프린트
+@app.route들이 많아지면 한곳에 이 모든 경로들을 쓰는 것은 상당히 불편하고 어렵다. 블루프린트를 이용해 구조적으로(분리)관리해보자.
+
+먼저 pybo/__init__.py파일의 hello_pybo함수에 블루 프린트를 적용해보자.
+views 디렉토리를 pybo 하위에 생성 후 view 하위에 main_views.py를 만든다. 그리고 아래와 같이 적는다.
+
+```python
+from flask import Blueprint
+
+bp = Blueprint('main', __name__, url_prefix='/')#bp 객체
+#blueprint는 이름, 모듈명, url prefix값을 입력으로 객체를 생성함.
+#main이라는 이름은 나중에 함수명으로 url을 찾아내는 url_for함수에서 사용된다.
+#url prefix는 url 앞에 항상 붙게 되는 프리픽스 url을 말한다. 만약 url_prefix='/'대신 url_prefix='/main' 이라면 http://localhost:5000/ 대신 http://localhost:5000/main/ 로 호출해야 한다.
+
+@bp.route('/')
+def hello_pybo():
+    return 'Hello, Pybo!'
+```
+그리고 __init__.py를 수정하자
+```python
+from flask import Flask
+
+
+def create_app():
+    app = Flask(__name__)
+
+    # ---------------------------------------- [edit] ---------------------------------------- #
+    from .views import main_views
+    app.register_blueprint(main_views.bp)
+    # ---------------------------------------- [edit] ---------------------------------------- #    
+
+    return app
+```
+ 파일에서 생성한 블루프린트객체 bp를 app에 등록을 해준다.
+
+ 다시 main_views.py를 수정해보자
+ ```python
+ from flask import Blueprint
+
+bp = Blueprint('main', __name__, url_prefix='/')
+
+# ---------------------------------------- [edit] ---------------------------------------- #
+@bp.route('/hello')
+def hello_pybo():
+    return 'Hello, Pybo!'
+
+
+@bp.route('/')
+def index():
+    return 'Pybo index'
+# ---------------------------------------- [edit] ---------------------------------------- #     
+ ```
+블루 프린트에 대한 더 자세한 내용은 프로젝트를 진행하며 알아가보자(지금은 app 라우터들을 다른 파일로 확장하는 용도로 이해)
+
 ## 모델
+우리가 만들 파이보는 질문과 답변 서비스이다. 질문을 작성하거나 답변을 작성하면 필수적으로 데이터가 생성된다. 따라서 데이터를 저장하고 읽고 수정하는 등의 기능들이 반드시 필요하다. 파이보와 같은 웹서비스는 이러한 데이터 처리를 위해 데이터베이스를 사용한다. DB는 데이터를 처리하는데 특화된 시스템을 의미한다.
+
+웹프로그램에서 DB사용을 위해서는 DB에 접속하여 쿼리를 수행해야 한다.(쿼리란 DB에 어떤 규칙에 맞는 형식의 질문을 하는 것 => SQL : Structured Query Language)
+## ORM
+이때 ORM을 이요하면 개발자가 직접 쿼리문을 작성하지 않고 테이블과 매핑된 모델 객체를 통해서 데이터 작업을 처리할 수 있다.
+예를 들어 질문 테이블에 데이터를 한건 입력하려면 다음과 같은 쿼리를 수행해야 한다. 특히 ORM을 사용시 MySQL, Oracle등 DB에 따라 다른 SQL문을 각각 다시 적을 필요가 없다. 그대로 모델을 사용하므로 독특한 쿼리문이 만들어지거나 잘못 작성할 가능성도 적어진다.
+```SQL
+insert into question (subject, content) values ('제목', '내용');
+```
+단 ORM을 사용하면 쿼리문 대신 모델을 이용하여 다음과 같이 데이터를 한건 입력할 수 있다. 단 ORM을 사용하더라도 내부적으로 쿼리문이 생성되어 보내지는 것임을 잊지 말자.
+```python
+question = Question(subject='제목', content='내용')
+db.session.add(question)
+```
+pybo 서비스는 직접 쿼리문을 작성하지 않고 ORM을 사용할 것이다. SQLAlchemy를 사용할 예정이며 테이블을 생성하고 컬럼을 추가하는 일들을 DB에서 직접하는 것이 아닌 모델을 통해 변경할 수 있도록 Flask-Migrate 라이브러리를 설치할 것이다. Flask-Migrate를 설치시 SQLAlchemy도 함께 설치된다.  가상환경에서 다음 명령을 수행하자.
+```linux
+pip install Flask-Migrate
+```
+## ORM 적용
+ORM을 적용해보자. 먼저 config.py파일을 myproject폴더 하위에 생성하자.
+```python
+import os
+
+BASE_DIR = os.path.dirname(__file__)
+
+SQLALCHEMY_DATABASE_URI = 'sqlite:///{}'.format(os.path.join(BASE_DIR, 'pybo.db'))
+SQLALCHEMY_TRACK_MODIFICATIONS = False#이벤트 처리 위한 옵션으로 추가 메모리를 쓰므로 기능 끄기
+```
+BASE_DIR은 .\myproject 를 의미한다.
+SQLALCHEMY_DATABASE_URI 변수는 데이터베이스의 접속주소를 의미하는데 파이보는 SQLite 데이터베이스의 접속주소를 위와 같이 입력하도록 하자. 데이터베이스 파일은 BASE_DIR 하위에 pybo.db 라는 파일에 저장한다고 정의하였다.
+
+그리고 다음처럼 pybo/__init__.py 파일을 수정하자
+```python
+from flask import Flask
+# ---------------------------------------- [edit] ---------------------------------------- #
+from flask_migrate import Migrate
+from flask_sqlalchemy import SQLAlchemy
+
+import config
+
+db = SQLAlchemy()
+migrate = Migrate()
+# ---------------------------------------------------------------------------------------- #
+
+def create_app():
+    app = Flask(__name__)
+    # ---------------------------------------- [edit] ---------------------------------------- #
+    app.config.from_object(config)
+
+    # ORM
+    db.init_app(app)
+    migrate.init_app(app, db)
+    # ---------------------------------------------------------------------------------------- #
+
+    # 블루프린트
+    from .views import main_views
+    app.register_blueprint(main_views.bp)
+
+    return app
+```
 ## 조회와 템플릿
 ## 데이터 저장
 ## 스태틱
