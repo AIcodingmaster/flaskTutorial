@@ -619,16 +619,628 @@ http://localhost:5000/detail/2/ 와 같은 페이지가 요청되면 위 매핑�
 |200	|성공 (OK)|
 |500|	서버오류 (Internal Server Error )|
 |404|	서버가 요청한 페이지(Resource)를 찾을 수 없음 (Not Found)|
-뷰단을 간단하게 수정하면 이를 자동으로 할 수 있다.
+
+뷰단을
+Question.query.get(question_id) => .get_or_404(...)로
+ 간단하게 수정하면 이를 자동으로 할 수 있다.
 ## 블루 프린트
-모든 것을 main_views.py에 구현할수도 있겠지만 기능별로 블루프린트 파일로 분리하여 관리하는것이 좋다.
+모든 것을 main_views.py에 구현할수도 있겠지만 기능별로 블루프린트 파일로 분리하여 관리하는것이 좋다. 아래 코드를 question_views.py에 작성하자
+```python
+from flask import Blueprint, render_template
+
+from pybo.models import Question
+
+bp = Blueprint('question', __name__, url_prefix='/question')
+
+
+@bp.route('/list/')
+def _list():
+    question_list = Question.query.order_by(Question.create_date.desc())
+    return render_template('question/question_list.html', question_list=question_list)
+
+
+@bp.route('/detail/<int:question_id>/')
+def detail(question_id):
+    question = Question.query.get_or_404(question_id)
+    return render_template('question/question_detail.html', question=question)
+```
+
+메인 뷰와 차이는 블루프린트 생성시 question이라는 이름을 사용하고 url_prefix도 /question을 사용하여 main_views.py와 구별하였다. index함수도 _list로 변경하자. 그럼 question 뷰 블루 프린트를 적용하기위해 init파일에 이를 등록하자
+
+## url_for
+그리고 main_views.py파일에서 질문목록과 상세조회 기능을제거하고 다음과 같이 수정하자.
+```python
+from flask import Blueprint, url_for
+from werkzeug.utils import redirect
+
+bp = Blueprint('main', __name__, url_prefix='/')
+
+
+@bp.route('/hello')
+def hello_pybo():
+    return 'Hello, Pybo!'
+
+
+@bp.route('/')
+def index():
+    return redirect(url_for('question._list'))
+```
+여기서 redirect함수는 입력으로 받은 url로 리다이렉트 해주는 함수이다. url_for함수는 라우트가 설정되어 있는 함수명으로 해당 url을 역으로 찾아주는 함수이다.
+그 다음 question_l.html을 다음과 같이 수정하자.
+```python
+{% if question_l %}
+    <ul>
+    {%for q in question_l %}
+            <li><a href='{{url_for("question.detail",question_id=q.id)}}'>{{q.subject}}</a></li>#edited
+    {% endfor %}
+    </ul> 
+{% else %}
+    <li>작성된 글이 없습니다.</li>
+{% endif %}
+```
+위 코드와 같이 수정한 이유는 실제 url을 쓰는 것 보다 blueprint아이디를 통해 접근하는 것이 대대적인 웹페이지 구조 변경 등에 있어 추적이 편하기 때문이다.(url은 자주 변경될 가능성이 있지만 함수 자체가 변경될 가능성은 적음)
 
 ## 데이터 저장
+question_d.html 파일을 다음과 같이 수정하자.
+```python
+<h1>{{ question.subject }}</h1>
+
+<div>
+    {{ question.content }}
+</div>ㅌ
+
+<!-- ---------------------------------------- [edit] ---------------------------------------- -->
+<form action="{{ url_for('answer.create', question_id=question.id) }}" method="post">
+<textarea name="content" id="content" rows="15"></textarea>
+<input type="submit" value="답변등록">
+</form>
+<!-- ---------------------------------------------------------------------------------------- -->
+```
+답변의 내용을 입력할 수 있는 텍스트창을 추가하고 답변을 저장할 수 있는 "답변등록" 버튼을 추가하였다. 답변을 저장하는 URL은 form 태그의 action 속성에 지정된 url_for('answer.create',question_id=question.id)이다.
+그러므로 우리는 answer이름을 가진 블루프린트 뷰를 생성하고 그안에 create 함수를 만들어야 한다(question.id 값도 넘겨주므로 answer 객체에 이 값을 저장 하는 동작을 함수 안에 구현해야 한다.)
+다음을 answer_views.py에 추가하자
+```python
+from datetime import datetime
+
+from flask import Blueprint, url_for, request
+from werkzeug.utils import redirect
+
+from pybo import db
+from pybo.models import Question, Answer
+
+bp = Blueprint('answer', __name__, url_prefix='/answer')
+
+
+@bp.route('/create/<int:question_id>', methods=('POST',))
+def create(question_id):
+    question = Question.query.get_or_404(question_id)
+    content = request.form['content']
+    answer = Answer(question=question, ontent=content, create_date=datetime.now())
+    #question.answer_set.append(answer)
+    db.session.commit()
+    return redirect(url_for('question.detail', question_id=question_id))
+```
+답변 등록을 누르면 해당 form의 action속성에 의해 create 함수로 들어오게 된다. 방법은 post방식이다.
+그리고 폼에서 전달되는 모든 데이터는 request객체를 통해서 얻을 수 있다. dictionary형태로 key값은 해당
+태그의 name으로 접근이 가능하다. 그리고 models.py에서 정의 했듯이 Question으로 answer에 접근이 가능하다.
+backref에 의해 그 반대도 가능하다. 추가 하는 방법은 question=question을 주석으로 대체할 수 있다.
+answer_views의 블루프린트를 혹시 적용하지 않았다면 적용하자. 이제 화면을 보자. 어떤가 수정이 되었는가? 만약 등록 후 textarea글자만 사라지고 아무 변화가 없다면 등록이 잘 된것이고, 아니라면 오류이니 잘 체크해보자.
+
+## 답변 조회
+
+ question_d.html을 다음과 같이 수정한다.
+```python
+<h1>{{ question.subject }}</h1>
+
+<div>
+    {{ question.content }}
+</div>
+
+<!-- ---------------------------------------- [edit] ---------------------------------------- -->
+<h5>{{ question.answer_set|length }}개의 답변이 있습니다.</h5>
+<div>
+    <ul>
+    {% for answer in question.answer_set %}
+        <li>{{ answer.content }}</li>
+    {% endfor %}
+    </ul>
+</div>
+<!-- ---------------------------------------------------------------------------------------- -->
+
+<form action="{{ url_for('answer.create', question_id=question.id) }}" method="post">
+<textarea name="content" id="content" rows="15"></textarea>
+<input type="submit" value="답변등록">
+</form>
+```
+여기서 이해가 되지 않는 것은 {{ question.answer_set|length }}일 것이다. length은 템플릿 필터이다. 더 자세한 내용은 다음을 
+참고하자.
+- 템플릿 필터 : https://jinja.palletsprojects.com/en/2.11.x/templates/#builtin-filters
+
+수정하고 화면을 보면 다음과 같은 화면을 볼 수 있을 것이다.
+
 ## 스태틱
+지금까지 목록조회 화면과 상세조회 화면을 만ㄷ를어 보았다. 하지만 좀 더 그럴싸한 화면을 만들기 위해서는 화면에 디자인을 적용해야 한다. 화면에 디자인을 적용하기 위해서는 스타일 sheet(css, jpg, png 등등)를 사용해야 한다.
+
+## static 디렉터리
+static 디렉터리는 템플릿 디렉터리와 마찬가지로 플라스크가 앱으로 지정한 모듈 하위에 static이라는 디렉터리명으로 생성해 주면 된다. 우리가 사용한 플라스크 앱은 pybo 모듈이다. 따라서 pybo 디렉터리 하위에 static이라는 디렉터리를 다음과 같이 생성해 주자.
+## 스타일 시트
+이제 스타일 시트 파일은 이제 다음 디렉터리 하위에 저장하면 된다.
+stly.css파일을 다음과 같이 작성하자.
+```css
+textarea {
+    width:100%;
+}
+
+input[type=submit] {
+    margin-top:10px;
+}
+```
+답변 등록시 사용되는 텍스트창의 넓이를 100%로 바꾸고, "답변 등록" 버튼 상단에 10픽셀의 마진을 주도록 하였다.
+
+```html
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+```
+그리고 윗줄을 question_d.html파일 제일 윗줄에 추가하도록 하자. 링크는 말그대로 static 폴더안의 style.css로 링크한다는 내용이다.
+이제 우리는 디자인이 적용된 화면을 볼수 있다.
 ## 부트스트랩
+부트스랩을 통해 웹페이지를 디자인해보자.
+
+- 부트스트랩 : https://getbootstrap.com/
+
+그 다음 bootstrap.min.css파일을 찾아서 static 폴더 안에 넣자.
+단 다운받은 집파일 삭제 x. 다른 파일도 쓸 예정
+
+## 부트스트랩 적용
+목록 조회 템플릿에 부트스트랩을 적용해 보자.
+```html
+<link rel="stylesheet" href="{{ url_for('static', filename='bootstrap.min.css') }}">
+```
+위 코드를 list파일 맨윗줄에 넣자.
+이제 부트스트랩을 쓸수 있다. link태그 아래 내용을 아래로 교체하자.
+```html
+<div class="container my-3">
+    <table class="table">
+        <thead>
+        <tr class="thead-dark">
+            <th>번호</th>
+            <th>제목</th>
+            <th>작성일시</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% if question_l %}
+        {% for question in question_l %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td>
+                <a href="{{ url_for('question.detail', question_id=question.id) }}">{{ question.subject }}</a>
+            </td>
+            <td>{{ question.create_date }}</td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+            <td colspan="3">질문이 없습니다.</td>
+        </tr>
+        {% endif %}
+        </tbody>
+    </table>
+</div>
+```
+여기서 사용된 class="container my-3", class="table", class="thead-dark 등은 부트스트랩이 제공하는 클래스들이다. 부트스트랩에 대한 자세한 내용은 다음 URL을 참조하기 바란다.
+- https://getbootstrap.com/docs/4.4/getting-started/introduction/
+
+태그에 대한 내용은 따로 설명하지 않겠다.
+d파일도 다음 코드로 변경한 후 페이지를 확인해보자.
+```html
+<link rel="stylesheet" href="{{ url_for('static', filename='bootstrap.min.css') }}">
+<div class="container my-3">
+    <h2 class="border-bottom py-2">{{ question.subject }}</h2>
+    <div class="card my-3">
+        <div class="card-body">
+            <div class="card-text" style="white-space: pre-line;">{{ question.content }}</div>
+            <div class="d-flex justify-content-end">
+                <div class="badge badge-light p-2">
+                    {{ question.create_date }}
+                </div>
+            </div>
+        </div>
+    </div>
+    <h5 class="border-bottom my-3 py-2">{{ question.answer_set|length }}개의 답변이 있습니다.</h5>
+    {% for answer in question.answer_set %}
+    <div class="card my-3">
+        <div class="card-body">
+            <div class="card-text" style="white-space: pre-line;">{{ answer.content }}</div>
+            <div class="d-flex justify-content-end">
+                <div class="badge badge-light p-2">
+                    {{ answer.create_date }}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+    <form action="{{ url_for('answer.create', question_id=question.id) }}" method="post" class="my-3">
+        <div class="form-group">
+            <textarea name="content" id="content" class="form-control" rows="10"></textarea>
+        </div>
+        <input type="submit" value="답변등록" class="btn btn-primary">
+    </form>
+</div>
+```
+
 ## 템플릿 상속
+지금까지 작성한 목록조회와 상세조회 템플릿은 표준 HTML문서가 아니다. 표준은 다음과 같다.
+```html
+<!doctype html>
+<html lang="ko">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='bootstrap.min.css') }}">
+    <!-- pybo CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Hello, pybo!</title>
+</head>
+<body>
+
+... 생략 ...
+ㅇㅇ
+</body>
+</html>
+```
+표준 HTML문서는 위의 예처럼 html, head, body 태그가 있어야 하고 스타일시트 파일은 head 태그안에 있어야 한다. 그리고 head 태그 안에는 필요한 meta 태그와 title태그등도 포함되어 있어야 한다.
+
+위와 같은 표준 html구조가 되게 하기 위해 템플릿을 수정해보자.
+그러나 모든 템플릿을 위와같은 구조로 변경시 모든 템플릿에 바디 외의 부분이 다 중복될 것이다.
+그리고 새로운 스타일시트가 추가되거나 수정될경우 각파일마다 수정해 주어야 하는 번거로움이 발생하게된다.
+
+플라스크는 이러한 단점을 없애기 위해 extend라는 기능을 제공한다.
+
+## base.html
+base.html을 templates 폴더 하위에 만들고 다음 코드를 쓰자.
+
+```html
+<!-- ---------------------------------------- [edit] ---------------------------------------- -->
+<!doctype html>
+<html lang="ko">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='bootstrap.min.css') }}">
+    <!-- pybo CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Hello, pybo!</title>
+</head>
+<body>
+<!-- 기본 템플릿 안에 삽입될 내용 Start -->
+{% block content %}
+{% endblock %}
+<!-- 기본 템플릿 안에 삽입될 내용 End -->
+</body>
+</html>
+<!-- ---------------------------------------------------------------------------------------- -->
+```
+이때 아랫부분이 base.html을 상속한 템플릿에서 구현해야하는 부분이 된다.
+```
+{% block content %}
+{% endblock %}
+```
+link부분을 삭제하고 question_l.html을 다음과 같이 쓰자.
+```html
+{% extends 'base.html'%}
+{% block content%}
+<div class="container my-3">
+    <table class="table">
+        <thead>
+        <tr class="thead-dark">
+            <th>번호</th>
+            <th>제목</th>
+            <th>작성일시</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% if question_list %}
+        {% for question in question_list %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td>
+                <a href="{{ url_for('question.detail', question_id=question.id) }}">{{ question.subject }}</a>
+            </td>
+            <td>{{ question.create_date }}</td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+            <td colspan="3">질문이 없습니다.</td>
+        </tr>
+        {% endif %}
+        </tbody>
+    </table>
+</div>
+{%endblock%}
+```
+style.css파일은 쓸모 없어졌으므로 내용을 비우자. 부트스트랩으로 구현이 어려운것은 이곳에 작성하면 된다.
 ## 폼
- # 플라스크 심화
+form을 사용하기 위해서는 Flask-WTF을 먼저 설치해야 한다. 다음처럼 Flask-WTF을 설치하자.
+```
+(myproject) c:\projects\myproject>pip install Flask-WTF
+```
+그리고 Flask-WTF을 사용하기 위해서는 플라스크 환경변수 SECRET_KEY가 필요하다.  SECRET_KEY는 CSRF(cross-site request forgery)에서 사용된다. CSRF는 보안에 관련된 항목으로 form으로 전송된 데이터가 실제 웹페이지에서 작성된 데이터인지를 판단해 주는 가늠자 역할을 한다. 플라스크에서 CSRF를 어떻게 사용하는지는 잠시후에 알아보기로 하자.
+
+다음과 같이 config.py 파일에 SECRET_KEY 환경변수를 추가해 주자.
+```
+SECRET_KEY = "dev"
+```
+SECRET_KEY = "dev" 라고 추가했는데 현재는 개발환경이기 때문에 이렇게 설정해도 무방하지만 실제 운영환경에서는 "dev"처럼 유추하기 쉬운 문자열을 사용해서는 안된다. 운영환경에서 SECRET_KEY를 설정하는 방법에 대해서는 4장에서 알아볼 것이다.
+
+## 질문 등록
+우선 다음처럼 목록조회 템플릿 하단에 질문을 등록할 수 있는 버튼을 생성하자.
+```html
+</table>
+<a href="{{ url_for('question.create') }}" class="btn btn-primary">질문 등록하기</a>
+```
+
+## 뷰 함수 추가
+이제 부터 뷰단은 이미 설명이 다 되었으므로 코드로 바로 이해하도록 하자.
+```python
+@bp.route('/create/')
+def create():
+    form = QuestionForm()
+    return render_template('question/question_form.html', form=form)
+```
+질문하기를 눌렀을때 질문을 쓸 수 있는 페이지 템플릿과 QuestionForm()객체를 만들어야 한다.
+## 폼 작성
+pybo.form.py를 만들고 아래 코드를 쓰자
+```python
+from flask_wtf import FlaskForm
+from wtforms import StringField, TextAreaField
+from wtforms.validators import DataRequired
+
+
+class QuestionForm(FlaskForm):
+    subject = StringField('제목', validators=[DataRequired()])
+    content = TextAreaField('내용', validators=[DataRequired()])
+```
+폼의 속성과 모델의 속성이 비슷함을 알 수 있을 것이다. 글자수의 제한이 있는 "제목"의 경우 StringField를 사용하고 글자수의 제한이 없는 "내용"은 TextAreaField를 사용한다.
+
+플라스크에서 사용할 수 있는 필드에 대한 보다 자세한 내용은 다음 URL을 참고하자.
+- https://wtforms.readthedocs.io/en/2.3.x/fields/#basic-fields
+StringField('제목', validators=[DataRequired()]) 에서 첫번째 입력인수인 "제목"은 폼 라벨(Label)이다. 템플릿에서 이 라벨을 이용하여 "제목"이라는 라벨을 출력할 수 있다. 이 부분은 잠시후에 다시 알아보기로 하자. 두번째 입력인수는 validators이다. validators는 검증을 위해 사용되는 도구로 필수 항목인지를 체크하는 DataRequired, 이메일인지를 체크하는 Email, 길이를 체크하는 Length등이 있다. 예를들어 필수값이면서 이메일이어야 하면 validators=[DataRequired(), Email()] 과 같이 사용할 수 있다.
+
+플라스크에서 사용할 수 있는 validators에 대한 보다 자세한 내용은 다음 URL을 참고하자.
+- https://wtforms.readthedocs.io/en/2.3.x/validators/#built-in-validators
+
+## 템플릿 작성
+질문을 등록하는 폼 템플릿을 question 폴더 하위에 다음과 같이 만들자(question_f.html)
+```html
+{% extends 'base.html' %}
+{% block content %}
+<div class="container">
+    <h5 class="my-3 border-bottom pb-2">질문등록</h5>
+    <form  method="post" class="post-form my-3">
+
+        {{ form.subject.label }}
+        {{ form.subject() }}
+
+        {{ form.content.label }}
+        {{ form.content() }}
+
+        <button type="submit" class="btn btn-primary">저장하기</button>
+    </form>
+</div>
+{% endblock %}
+```
+그리고 폼태그는 포스트 방식이므로 
+```python
+@bp.route('/create/', methods=('GET', 'POST'))
+```
+create 함수의 라우트에 폼방식또한 추가하기 위해 위 코드로 변경한다. methods의 디폴트값은 GET이다.
+```python
+def create():
+    form = QuestionForm()
+    # ---------------------------------------- [edit] ---------------------------------------- #
+    if request.method == 'POST' and form.validate_on_submit():
+        question = Question(subject=form.subject.data, content=form.content.data, create_date=datetime.now())
+        db.session.add(question)
+        db.session.commit()
+        return redirect(url_for('main.index'))
+    # ---------------------------------------------------------------------------------------- #        
+    return render_template('question/question_form.html', form=form)
+```
+폼 전송이 POST로 요청된 경우 질문데이터를 한건 등록하도록 수정하였다. request.method는 현재 요청된 전송방식을 의미한다. form.validate_on_submit() 은 POST로 전송된 폼 데이터의 정합성을 체크한다. 폼 데이터의 정합성은 폼 작성시 생성했던 DataRequired() 같은 체크항목을 말한다. 폼으로 전송된 "제목"은 form.subject.data 처럼 data속성을 사용하여 얻을 수 있다.
+
+그리고 POST로 전송된 데이터의 저장이 완료되면 메인화면(main.index)으로 리다이렉트하도록 하였다.
+
+여기서 중요한 점은 GET과 POST에 의해 템플릿이 렌더링되고 데이터가 저장되는 메커니즘을 잘 이해해야 한다는 점이다. 목록조회 화면에서 "질문 등록하기" 버튼을 클릭한 경우에는 http://localhost:5000/question/create/ 페이지가 GET 방식으로 요청(request.method == 'GET')되어 질문등록 화면이 호출되고 질문등록 화면에서 "저장하기" 버튼을 클릭하면 http://localhost:5000/question/create/ 페이지가 POST 방식으로 호출(request.method == 'POST')되어 데이터가 저장된다.
+
+※ form태그의 action속성이 없는 경우는 현재의 페이지로 폼이 전송된다.
+※ 혹시 main화면으로 넘어가지 않는 경우 validation의 오류일 수 있다. 
+```
+        {{ form.csrf_token }}
+```
+를 폼 태그 안에 넣으면 될 것이다.
+## 폼 위젯
+{{ form.subject() }} 와 같은 코드는 HTML코드가 자동으로 생성되기 때문에 부트스트랩을 적용할 수가 없다.  해결방법은 없을까?
+
+완벽하지는 않지만 다음처럼 템플릿을 조금 수정하면 어느정도 해결이 가능하다.
+question_f.html을 다음과 같이 수정하자
+```html
+{% extends 'base.html' %}
+{% block content %}
+<div class="container">
+    <h5 class="my-3 border-bottom pb-2">질문등록</h5>
+    <form method="post" class="post-form my-3">
+        {% for field, errors in form.errors.items() %}
+        <div class="alert alert-danger" role="alert">
+            <strong>{{ form[field].label }}</strong>: {{ ', '.join(errors) }}
+        </div>
+        {% endfor %}
+        {{ form.subject.label }}
+        <!-- ---------------------------------------- [edit] ---------------------------------------- -->
+        {{ form.subject(class="form-control") }}
+        <!-- ---------------------------------------------------------------------------------------- -->
+
+        {{ form.content.label }}
+        <!-- ---------------------------------------- [edit] ---------------------------------------- -->
+        {{ form.content(class="form-control") }}
+        <!-- ---------------------------------------------------------------------------------------- -->
+
+        <button type="submit" class="btn btn-primary">저장하기</button>
+    </form>
+</div>
+{% endblock %}
+```
+form.subject나 form.content 코드에 class="form-control" 처럼 부트스트랩의 클래스를 적용할 수 있다.
+아래 내용을 추가한다. form.validate_on_submit()가 실패하면 오류가 form에 자동 등록된다. 이는 form.erros속성을 이용하여 볼 수 있다.
+
+```html
+ {% for field, errors in form.errors.items() %}
+        <div class="alert alert-danger" role="alert">
+            <strong>{{ form[field].label }}</strong>: {{ ', '.join(errors) }}
+        </div>
+        {% endfor %}
+```
+이제 어떤 에러인지 웹페이지에서 뜬다.
+## 사라진 필드
+하지만 정상적인 등록을 위해서는 아직 몇가지 문제가 남아있다. 질문등록 시 "질문"에는 내용을 입력하고 "내용"에는 아무런 값도 입력하지 않을 경우 "내용"을 입력하라는 오류메시지가 나타날 것이다. 하지만 이미 등록했던 제목의 값이 사라진다는 점을 확인할 수 있을 것이다. "내용"만 입력하면 되는데 이미 입력했던 "제목"도 다시 입력해야 하는 불편함이 발생하게 된다.
+
+폼을 전송했을 때 오류가 나더라도 이미 입력한 값들을 유지하기 위해서는 다음처럼 템플릿을 수정해 주어야 한다.
+```html
+<div class="container">
+    <h5 class="my-3 border-bottom pb-2">질문등록</h5>
+    <form method="post" class="post-form my-3">
+        <...>
+        <div class="form-group">
+            <label for="subject">제목</label>
+            <!-- ---------------------------------------- [edit] ---------------------------------------- -->
+            <input type="text" class="form-control" name="subject" id="subject"
+                   value="{{ form.subject.data or '' }}">
+            <!-- ---------------------------------------------------------------------------------------- -->
+        </div>
+        <div class="form-group">
+            <label for="content">내용</label>
+            <!-- ---------------------------------------- [edit] ---------------------------------------- -->
+            <textarea class="form-control" name="content"
+                      id="content" rows="10">{{ form.content.data or '' }}</textarea>
+            <!-- ---------------------------------------------------------------------------------------- -->
+        </div>
+        <button type="submit" class="btn btn-primary">저장하기</button>
+    </form>
+</div>
+{% endblock %} 
+```
+subject와 content 필드의 값에 {{ form.subject.data or '' }} 처럼 이미 폼으로 전송했던 값이 설정되도록 해 주었다. 이렇게 해주면 폼에 전송한 데이터가 다시 입력항목에 자동으로 설정되어 이미 입력했던 값을 유지할 수가 있다. {{ form.subject.data or '' }} 코드에서 or '' 을 해 준 이유는 이 템플릿이 GET으로 요청되었을 경우에는 기존에 입력된 값이 없어서 None이 출력되기 때문이다. None을 출력하는 것을 방지하기 위해서는 위와 같이 or '' 코드를 사용해야 한다. 이렇게 하면 form.subject.data 에 값이 없을 경우에는 None대신 '' 이 출력된다.
+
+이렇게 수정하고 다시 "제목"에만 값을 입력하고 "내용"은 비워둔 채로 "저장하기"를 클릭해 보자. 이제 기존에 입력했던 "제목"의 내용이 사라지지 않고 잘 유지되는 것을 확인할 수 있을 것이다.
+
+## 오류 메세지
+이번에는 필수항목을 입력하지 않았을 때 발생하는 "This field is required."와 같은 영문 오류메시지를 한글 오류메시지로 바꾸어 보자.
+
+forsm.py 파일을 다음과 같이 수정하자.
+```python
+from flask_wtf import FlaskForm
+from wtforms import StringField, TextAreaField
+from wtforms.validators import DataRequired
+
+
+class QuestionForm(FlaskForm):
+    # ---------------------------------------- [edit] ---------------------------------------- #
+    subject = StringField('제목', validators=[DataRequired('제목은 필수입력 항목입니다.')])
+    content = TextAreaField('내용', validators=[DataRequired('내용은 필수입력 항목입니다.')])
+    # ---------------------------------------------------------------------------------------- #
+```
+
+## 답변 등록
+이번에는 상세조회 화면에서 답변을 등록할때도 플라스크 폼을 사용하도록 수정해 보자.
+
+먼저 답변등록시 사용할 AnswerForm을 forms.py 파일에 다음과 같이 만들어주자.
+```python
+class AnswerForm(FlaskForm):
+    content = TextAreaField('내용', validators=[DataRequired('내용은 필수입력 항목입니다.')])
+```
+그리고 answer_views.py의 create 함수를 다음과 같이 수정한다.
+```python
+...
+# ---------------------------------------- [edit] ---------------------------------------- #
+from flask import Blueprint, url_for, request, render_template
+# ---------------------------------------------------------------------------------------- #
+from werkzeug.utils import redirect
+
+from .. import db
+# ---------------------------------------- [edit] ---------------------------------------- #
+from ..forms import AnswerForm
+# ---------------------------------------------------------------------------------------- #
+from ..models import Question, Answer
+
+bp = Blueprint('answer', __name__, url_prefix='/answer')
+
+
+@bp.route('/create/<int:question_id>', methods=('POST',))
+def create(question_id):
+    # ---------------------------------------- [edit] ---------------------------------------- #
+    form = AnswerForm()
+    question = Question.query.get_or_404(question_id)
+    if form.validate_on_submit():
+        content = request.form['content']
+        answer = Answer(content=content, create_date=datetime.now())
+        question.answer_set.append(answer)
+        db.session.commit()
+        return redirect(url_for('question.detail', question_id=question_id))
+    return render_template('question/question_detail.html', question=question, form=form)
+    # ---------------------------------------------------------------------------------------- #
+```
+AnswerForm을 사용하도록 변경하였다. 질문등록시 사용했던 방법과 동일하므로 자세한 설명은 생략하겠다.
+
+그리고 상세조회 템플릿도 CSRF와 오류를 표시하기 위한 영역을 다음처럼 추가해 주도록 하자.
+```html
+<...>
+{% extends 'base.html' %}
+{% block content %}
+<div class="container my-3">
+    <...>
+    <form action="{{ url_for('answer.create', question_id=question.id) }}" method="post" class="my-3">
+        <!-- ---------------------------------------- [edit] ---------------------------------------- -->
+        {{ form.csrf_token }}
+        <!-- 오류표시 Start -->
+        {% for field, errors in form.errors.items() %}
+        <div class="alert alert-danger" role="alert">
+            <strong>{{ form[field].label }}</strong>: {{ ', '.join(errors) }}
+        </div>
+        {% endfor %}
+        <!-- 오류표시 End -->
+        <!-- ---------------------------------------------------------------------------------------- -->
+        <div class="form-group">
+            <textarea name="content" id="content" class="form-control" rows="10"></textarea>
+        </div>
+        <input type="submit" value="답변등록" class="btn btn-primary">
+    </form>
+</div>
+{% endblock %}
+<...>
+```
+그리고 상세조회 템플릿에 폼이 추가되었으므로 question_views.py의 detail함수도 폼을 사용하도록 다음처럼 수정해 주어야 한다.
+```python
+...
+# ---------------------------------------- [edit] ---------------------------------------- #
+from ..forms import QuestionForm, AnswerForm
+# ---------------------------------------------------------------------------------------- #
+...
+
+@bp.route('/detail/<int:question_id>/')
+def detail(question_id):
+    # ---------------------------------------- [edit] ---------------------------------------- #
+    form = AnswerForm()
+    question = Question.query.get_or_404(question_id)
+    return render_template('question/question_d.html', question=question, form=form)
+    # ---------------------------------------------------------------------------------------- #
+
+...
+```
+## 플라스크 심화
 ## 네비게이션 바
 ## 페이징
 ## 템플릿 필터
